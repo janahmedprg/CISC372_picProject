@@ -15,8 +15,17 @@ enum KernelTypes{EDGE=0,SHARPEN=1,BLUR=2,GAUSE_BLUR=3,EMBOSS=4,IDENTITY=5};
 
 typedef double Matrix[3][3];
 
+typedef struct Thread_args{
+    Image* srcImage;
+    Image* destImage;
+    Matrix algorithm;
+    int rank;
+    int thread_count;
+} Thread_args;
+
+void* threadFunc(void* thread_args);
 uint8_t getPixelValue(Image* srcImage,int x,int y,int bit,Matrix algorithm);
-void convolute(Image* srcImage,Image* destImage,Matrix algorithm);
+void convolute(Image* srcImage,Image* destImage,Matrix algorithm, int thread_count);
 int Usage();
 enum KernelTypes GetKernelType(char* type);
 

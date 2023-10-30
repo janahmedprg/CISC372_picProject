@@ -3,6 +3,7 @@
 #include <time.h>
 #include <string.h>
 #include "image.h"
+#include <pthread.h>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"
@@ -51,21 +52,68 @@ uint8_t getPixelValue(Image* srcImage,int x,int y,int bit,Matrix algorithm){
     return result;
 }
 
+void* threadFunc(void* threads_args){
+    Thread_args* thread_args = (Thread_args*) threads_args;
+    Image* srcImage= thread_args->srcImage;
+    Image* destImage= thread_args->destImage;
+    Matrix algorithm;  
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            algorithm[i][j] = thread_args->algorithm[i][j];
+        }
+    }
+    int rank = thread_args->rank;
+    int row,pix,bit,span;
+    int thread_count = thread_args->thread_count;
+    span=srcImage->bpp*srcImage->bpp;
+    if(rank+1 == thread_count){
+        for (row=rank*(srcImage->height/thread_count);row<srcImage->height;row++){
+            for (pix=0;pix<srcImage->width;pix++){
+                for (bit=0;bit<srcImage->bpp;bit++){
+                    destImage->data[Index(pix,row,srcImage->width,bit,srcImage->bpp)]=getPixelValue(srcImage,pix,row,bit,algorithm);
+                }
+            }
+        }
+    }
+    else{
+        for (row=rank*(srcImage->height/thread_count);row<(rank+1)*(srcImage->height/thread_count);row++){
+            for (pix=0;pix<srcImage->width;pix++){
+                for (bit=0;bit<srcImage->bpp;bit++){
+                    destImage->data[Index(pix,row,srcImage->width,bit,srcImage->bpp)]=getPixelValue(srcImage,pix,row,bit,algorithm);
+                }
+            }
+        }
+    }
+}
+
 //convolute:  Applies a kernel matrix to an image
 //Parameters: srcImage: The image being convoluted
 //            destImage: A pointer to a  pre-allocated (including space for the pixel array) structure to receive the convoluted image.  It should be the same size as srcImage
 //            algorithm: The kernel matrix to use for the convolution
 //Returns: Nothing
-void convolute(Image* srcImage,Image* destImage,Matrix algorithm){
-    int row,pix,bit,span;
-    span=srcImage->bpp*srcImage->bpp;
-    for (row=0;row<srcImage->height;row++){
-        for (pix=0;pix<srcImage->width;pix++){
-            for (bit=0;bit<srcImage->bpp;bit++){
-                destImage->data[Index(pix,row,srcImage->width,bit,srcImage->bpp)]=getPixelValue(srcImage,pix,row,bit,algorithm);
+void convolute(Image* srcImage,Image* destImage,Matrix algorithm, int thread_count){
+    
+    pthread_t* thread_handles;
+    thread_handles = (pthread_t*)malloc(thread_count*sizeof(pthread_t));
+    
+    for (int i = 0; i<thread_count;++i){
+        Thread_args* thread_args = (struct Thread_args*)malloc(sizeof(struct Thread_args));
+        thread_args->destImage = destImage;
+        thread_args->srcImage = srcImage;
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                thread_args->algorithm[i][j] = algorithm[i][j];
             }
         }
+        thread_args->thread_count = thread_count;
+        thread_args->rank = i;
+        pthread_create(&thread_handles[i], NULL, &threadFunc, (void*) thread_args);
     }
+    for(int i = 0; i<thread_count;++i){
+        pthread_join(thread_handles[i], NULL);
+    }
+    
+    free(thread_handles);
 }
 
 //Usage: Prints usage information for the program
@@ -91,8 +139,10 @@ enum KernelTypes GetKernelType(char* type){
 //argv is expected to take 2 arguments.  First is the source file name (can be jpg, png, bmp, tga).  Second is the lower case name of the algorithm.
 int main(int argc,char** argv){
     long t1,t2;
-    t1=time(NULL);
-
+    int thread_count;
+    printf("Enter number of threads: ");
+    scanf("%d", &thread_count);
+    t1=time(NULL); 
     stbi_set_flip_vertically_on_load(0); 
     if (argc!=3) return Usage();
     char* fileName=argv[1];
@@ -111,7 +161,7 @@ int main(int argc,char** argv){
     destImage.height=srcImage.height;
     destImage.width=srcImage.width;
     destImage.data=malloc(sizeof(uint8_t)*destImage.width*destImage.bpp*destImage.height);
-    convolute(&srcImage,&destImage,algorithms[type]);
+    convolute(&srcImage,&destImage,algorithms[type],thread_count);
     stbi_write_png("output.png",destImage.width,destImage.height,destImage.bpp,destImage.data,destImage.bpp*destImage.width);
     stbi_image_free(srcImage.data);
     
